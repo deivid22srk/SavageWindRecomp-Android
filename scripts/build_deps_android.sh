@@ -91,7 +91,9 @@ if [ ! -f "$DEPS/lib/shaderc/libshaderc.a" ]; then
         -DSPIRV_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON -DENABLE_GLSLANG_BINARIES=OFF \
         -DSPIRV_TOOLS_BUILD_STATIC=ON -DBUILD_SHARED_LIBS=OFF
     cmake --build "$W/shaderc/build" --target shaderc -j"$JOBS"
-    cmake --install "$W/shaderc/build"
+    # install would demand archives the shaderc target never builds: collect the .a files instead
+    mkdir -p "$DEPS/lib/shaderc"
+    find "$W/shaderc/build" -name '*.a' -not -path '*deqp*' -exec cp -n {} "$DEPS/lib/shaderc/" \;
     mkdir -p "$DEPS/include/shaderc"
     cp "$W/shaderc/libshaderc/include/shaderc/"*.h "$DEPS/include/shaderc/"
 fi
