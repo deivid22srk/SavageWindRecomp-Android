@@ -24,7 +24,7 @@ android {
             cmake {
                 arguments '-DANDROID_STL=c++_static',
                           '-DCMAKE_BUILD_TYPE=Release',
-                          '-DAPP_BUILD_DIR=' + projectDir.absolutePath + '/build_host'
+
                 cppFlags '-O2 -g -fno-strict-aliasing'
             }
         }
