@@ -66,13 +66,13 @@ if [ ! -f "$DEPS/lib/libavcodec.a" ]; then
     fetch https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz \
           8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e ffmpeg.tar.xz
     unpack ffmpeg.tar.xz ffmpeg
+    # --disable-asm: the NEON objects are not PIC and we link the static archives into libmain.so
     (cd "$W/ffmpeg" && ./configure --prefix="$DEPS" \
         --enable-cross-compile --target-os=linux --arch=aarch64 \
         --cc="$CC --target=aarch64-linux-android$API" \
         --cxx="$CXX --target=aarch64-linux-android$API" \
         --ar=$AR --nm=$PREB/llvm-nm --ranlib=$PREB/llvm-ranlib --strip=$PREB/llvm-strip \
         --enable-static --disable-shared --enable-pic --disable-asm \
-        # (asm off: the NEON objects are not PIC and we link the static archives into libmain.so; the C decoders do the work)
         --disable-autodetect --disable-programs --disable-doc --disable-network --disable-avdevice \
         --disable-avfilter --disable-swresample --disable-everything \
         --enable-protocol=file --enable-demuxer=matroska,mov \
