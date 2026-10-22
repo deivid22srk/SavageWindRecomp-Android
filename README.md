@@ -1,5 +1,7 @@
 # Savage Wind Recomp — Android
 
+[![Build Android APK](https://github.com/deivid22srk/SavageWindRecomp-Android/actions/workflows/build.yml/badge.svg)](https://github.com/deivid22srk/SavageWindRecomp-Android/actions/workflows/build.yml)
+
 Port Android (arm64-v8a) do [SavageWindRecomp](https://github.com/Revivedx/SavageWindRecomp) —
 a recompilação estática de *The Legend of Zelda: Breath of the Wild* (Nintendo Switch, versão
 1.8.2) para apps nativos. Este repositório mantém praticamente todo o código original e o
