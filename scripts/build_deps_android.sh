@@ -71,7 +71,8 @@ if [ ! -f "$DEPS/lib/libavcodec.a" ]; then
         --cc="$CC --target=aarch64-linux-android$API" \
         --cxx="$CXX --target=aarch64-linux-android$API" \
         --ar=$AR --nm=$PREB/llvm-nm --ranlib=$PREB/llvm-ranlib --strip=$PREB/llvm-strip \
-        --enable-static --disable-shared --enable-pic \
+        --enable-static --disable-shared --enable-pic --disable-asm \
+        # (asm off: the NEON objects are not PIC and we link the static archives into libmain.so; the C decoders do the work)
         --disable-autodetect --disable-programs --disable-doc --disable-network --disable-avdevice \
         --disable-avfilter --disable-swresample --disable-everything \
         --enable-protocol=file --enable-demuxer=matroska,mov \
