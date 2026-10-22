@@ -51,6 +51,8 @@ jobs:
 
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false  # the wrapper jar comes from the official gradle/gradle tag
 
       - name: Assemble release APK
         env:
