@@ -1,0 +1,39 @@
+# Never commit game files or keys (the app reads the user's own files at runtime)
+*.nsp
+*.xci
+*.nca
+*.nro
+*.nso
+*.kip
+*.xci.*
+extracted/
+exefs/
+romfs/
+prod.keys
+title.keys
+*.keys
+prod.keys.txt
+dev.keys
+
+# Build products
+.gradle/
+build/
+app/build/
+app/src/main/cpp/deps/
+app/src/main/jniLibs/
+app/release.keystore
+local.properties
+*.iml
+.idea/
+
+# APKs
+*.apk
+!gradle/wrapper/gradle-wrapper.jar
+dist/
+
+# Player-provided files (never shipped)
+splash.jpg
+splash.png
+*.log
+app/src/main/assets/clang-include/
+__pycache__/

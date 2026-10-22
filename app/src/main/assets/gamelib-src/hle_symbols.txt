@@ -1,0 +1,3 @@
+# Guest functions replaced by host ones (hle_<name> in the runtime), in every module but main.
+# musl longjmp: returns into the middle of a function (runtime/hle/setjmp.c)
+longjmp

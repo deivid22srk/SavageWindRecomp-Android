@@ -1,0 +1,5 @@
+// Top-level build file: Android Gradle Plugin + Chaquopy (on-device Python for the game code generator).
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+    id 'com.chaquo.python' version '17.1.0' apply false
+}
