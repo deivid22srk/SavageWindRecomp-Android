@@ -23,8 +23,7 @@ android {
         externalNativeBuild {
             cmake {
                 arguments '-DANDROID_STL=c++_static',
-                          '-DCMAKE_BUILD_TYPE=Release',
-
+                          '-DCMAKE_BUILD_TYPE=Release'
                 cppFlags '-O2 -g -fno-strict-aliasing'
             }
         }
