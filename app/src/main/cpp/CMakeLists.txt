@@ -54,8 +54,10 @@ add_library(main SHARED
     ${RUNTIME}/nvn/smaa_data.c
     ${RUNTIME}/nvn/vulkan/vma.cpp
     ${IMGUI_CORE} ${IMGUI_BACKENDS}
-    ${TOOLS}/gamelib_entry.c
-    ${ANDROID_DIR}/android_main.c ${ANDROID_DIR}/android_bridge.c)
+    ${ANDROID_DIR}/android_main.c ${ANDROID_DIR}/android_bridge.c
+    ${ANDROID_DIR}/vulkan_shims.c)
+# NOTE: tools/gamelib_entry.c is NOT part of libmain.so - it is the game code library's entry
+# (compiled on the player's device into swgame.so, like the desktop Makefile's GEN_OBJ).
 
 # the .mm UI sources are plain C++ apart from __APPLE__ blocks (as on Linux/Windows)
 set_source_files_properties(${UI_SRC} PROPERTIES LANGUAGE CXX)
@@ -97,3 +99,7 @@ target_link_libraries(main PRIVATE
     ${SHADERC_ARCHIVES}
     vulkan
     ${android-lib} ${log-lib} ${z-lib})
+
+# The Android link runs with --no-undefined, which skips lld's __start_/__stop_ synthesis for the
+# runtime's HLE / reset sections: hle.ld defines them (see the file).
+target_link_options(main PRIVATE "-Wl,-T,${ANDROID_DIR}/hle.ld")
