@@ -116,7 +116,7 @@ public class MainActivity extends SDLActivity {
     }
 
     @Override
-    protected void loadLibraries() {
+    public void loadLibraries() {
         for (String lib : getLibraries()) {
             bootLog("native: loading lib" + lib + ".so ...");
             try {
