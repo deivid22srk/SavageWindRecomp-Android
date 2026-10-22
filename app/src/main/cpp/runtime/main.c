@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -236,7 +237,7 @@ int main(int argc, char **argv) {
     const char *root = "extracted";  // (in the data root)
     bool skip_launcher = getenv("SAVAGEWIND_NO_LAUNCHER") || getenv("SAVAGEWIND_INPUT");  // tests boot straight in
     bool config = false;
-    static char arg_root[1024];
+    static char arg_root[PATH_MAX];  // (bionic fortify: realpath needs PATH_MAX)
     bool build_romfs = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--play")) skip_launcher = true;
