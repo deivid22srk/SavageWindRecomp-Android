@@ -36,26 +36,44 @@ public class MainActivity extends SDLActivity {
     private static final int REQ_PICK_FILE = 42;
 
     static Context sContext;  // package-private: Swgen reads it
+    private static File sBootLog;
 
     static {
-        // The libraries themselves are loaded by SDLActivity (getLibraries(): SDL3, main).
+        // The libraries themselves are loaded by SDLActivity (getLibraries(): bootlog, SDL3, main).
+    }
+
+    // ------------------------------------------------------------------ boot log
+    // Every startup step lands here (and in logcat "swboot"), so a failure during boot is
+    // visible in the user's own log capture. libbootlog.so appends native crashes to the
+    // same file through SAVAGEWIND_CRASHLOG.
+    private static void bootLog(String msg) {
+        android.util.Log.i("swboot", msg);
+        if (sBootLog == null) return;
+        try (FileOutputStream o = new FileOutputStream(sBootLog, true)) {
+            o.write((System.currentTimeMillis() + " " + msg + "\n").getBytes("UTF-8"));
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         File root = getExternalFilesDir(null);
         if (root == null) root = getFilesDir();
+        sBootLog = new File(root, "bootlog.txt");
+        bootLog("app: onCreate begin");
         try {
             // Read before the SDL thread starts: the runtime's paths.c picks the data root
             // up from SAVAGEWIND_DATA_ROOT. The compiler is the clang shipped inside the APK
             // (libclang.so in nativeLibraryDir), found through SAVAGEWIND_CC like on the desktop;
             // ld.lld is reached through a symlink in the PATH, since only nativeLibraryDir is
             // executable and the linker's name must be ld.lld for clang's -fuse-ld=lld.
-            Os.setenv("SAVAGEWIND_DATA_ROOT", root.getAbsolutePath(), true);
+            // (The symlink must live on internal storage: /storage's FUSE rejects symlink(2).)
             String libdir = getApplicationInfo().nativeLibraryDir;
+            Os.setenv("SAVAGEWIND_DATA_ROOT", root.getAbsolutePath(), true);
+            Os.setenv("SAVAGEWIND_CRASHLOG", sBootLog.getAbsolutePath(), true);
             Os.setenv("SAVAGEWIND_LIB_DIR", libdir, true);
             Os.setenv("SAVAGEWIND_CC", libdir + "/libclang.so", true);
-            File bin = new File(root, "bin");
+            File bin = new File(getFilesDir(), "bin");
             bin.mkdirs();
             try {
                 Os.symlink(libdir + "/libld.lld.so", new File(bin, "ld.lld").getAbsolutePath());
@@ -66,14 +84,49 @@ public class MainActivity extends SDLActivity {
             Os.setenv("LD_LIBRARY_PATH", libdir, true);
             Os.setenv("HOME", root.getAbsolutePath(), true);
             Os.setenv("TMPDIR", getCacheDir().getAbsolutePath(), true);
-        } catch (Exception ignored) {
+            bootLog("env: data_root=" + root + " libdir=" + libdir + " bin=" + bin
+                    + " ld.lld->" + (new File(bin, "ld.lld").exists() ? "ok" : "missing"));
+        } catch (Exception e) {
+            bootLog("env: setup FAILED: " + e);
         }
 
         copyAssets(root);
-        Python.start(new AndroidPlatform(getApplicationContext()));
+        bootLog("assets: copied");
+        try {
+            Python.start(new AndroidPlatform(getApplicationContext()));
+            bootLog("python: started");
+        } catch (Throwable t) {
+            bootLog("python: start FAILED: " + t);
+            throw t;
+        }
         ensureStorageAccess();
+        bootLog("storage: managed=" + Environment.isExternalStorageManager());
+        bootLog("sdl: entering SDLActivity.onCreate (loads bootlog, SDL3, main)");
         super.onCreate(savedInstanceState);
+        bootLog("sdl: SDLActivity.onCreate returned");
         nativeSetContext(this);
+        bootLog("native: context set");
+    }
+
+    // libbootlog first: it installs the signal handlers that record a native death while
+    // dlopen'ing the libraries below (invisible to uid-filtered log captures otherwise).
+    @Override
+    protected String[] getLibraries() {
+        return new String[] { "bootlog", "SDL3", "main" };
+    }
+
+    @Override
+    protected void loadLibraries() {
+        for (String lib : getLibraries()) {
+            bootLog("native: loading lib" + lib + ".so ...");
+            try {
+                System.loadLibrary(lib);
+            } catch (Throwable t) {
+                bootLog("native: lib" + lib + ".so FAILED: " + t);
+                throw t;  // SDLActivity catches this and shows its error dialog
+            }
+            bootLog("native: lib" + lib + ".so loaded");
+        }
     }
 
     // ------------------------------------------------------------------ storage permission

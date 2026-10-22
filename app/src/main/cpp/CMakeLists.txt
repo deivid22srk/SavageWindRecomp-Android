@@ -103,3 +103,10 @@ target_link_libraries(main PRIVATE
 # The Android link runs with --no-undefined, which skips lld's __start_/__stop_ synthesis for the
 # runtime's HLE / reset sections: hle.ld defines them (see the file).
 target_link_options(main PRIVATE "-Wl,-T,${ANDROID_DIR}/hle.ld")
+
+# ------------------------------------------------------------------ bootlog
+# Startup crash diagnostics (see android/bootlog.c). MainActivity loads it first, so a native
+# death while dlopen'ing SDL3 / libmain is recorded to the boot log + logcat "swboot" instead of
+# dying silently (the system's fatal-signal report never reaches uid-filtered log captures).
+add_library(bootlog SHARED ${ANDROID_DIR}/bootlog.c)
+target_link_libraries(bootlog PRIVATE ${log-lib})
