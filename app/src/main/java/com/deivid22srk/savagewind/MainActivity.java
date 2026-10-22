@@ -17,7 +17,7 @@ import android.provider.Settings;
 import android.system.Os;
 import android.widget.Toast;
 
-import com.chaquo.python.AndroidPlatform;
+import com.chaquo.python.android.AndroidPlatform;
 import com.chaquo.python.Python;
 
 import org.libsdl.app.SDLActivity;
