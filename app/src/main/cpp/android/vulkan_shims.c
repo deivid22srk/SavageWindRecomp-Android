@@ -206,10 +206,10 @@ VkResult vkCreateInstance(const VkInstanceCreateInfo *ci, const VkAllocationCall
     return real ? real(ci, ac, out) : VK_ERROR_INITIALIZATION_FAILED;
 }
 
-VKAPI_ATTR PFN_vkGetInstanceProcAddr VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst, const char *name) {
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst, const char *name) {
     static PFN_vkGetInstanceProcAddr real;
     if (!real) real = (PFN_vkGetInstanceProcAddr)sw_vk_real("vkGetInstanceProcAddr");
-    return real ? real(inst, name) : NULL;
+    return real ? (PFN_vkVoidFunction)real(inst, name) : NULL;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *layer, uint32_t *count,
