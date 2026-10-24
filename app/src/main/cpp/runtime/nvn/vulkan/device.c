@@ -266,13 +266,13 @@ static void create_device(void) {
     VkPhysicalDeviceFaultFeaturesEXT sup_ff = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, .pNext = &sup_div};
     VkPhysicalDeviceAddressBindingReportFeaturesEXT sup_abr = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT,
                                                                .pNext = &sup_ff};
-    VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT sup_fbl = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT,
-                                                                       .pNext = &sup_abr};
-    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR sup_uil = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR,
-                                                              .pNext = &sup_fbl};
-    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR sup_lr = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR,
-                                                                   .pNext = &sup_uil};
-    VkPhysicalDeviceFeatures2 sup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &sup_lr};
+    VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT sup_fbl_on = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT,
+                                                                          .pNext = &sup_abr};
+    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR sup_uil_on = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR,
+                                                                 .pNext = &sup_fbl_on};
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR sup_lr_on = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR,
+                                                                      .pNext = &sup_uil_on};
+    VkPhysicalDeviceFeatures2 sup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &sup_lr_on};
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &sup);
 #define VK_NEED(s, tag, f)                                                                                                             \
     do {                                                                                                                               \
