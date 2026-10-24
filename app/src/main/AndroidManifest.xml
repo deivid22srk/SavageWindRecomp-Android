@@ -21,17 +21,24 @@
         android:hardwareAccelerated="true"
         android:theme="@style/AppTheme">
 
+        <!-- Entry point: the start screen (graphics driver selection) lives in front of the
+             game, because the choice must exist before anything touches Vulkan. -->
         <activity
-            android:name=".MainActivity"
-            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:resizeableActivity="false"
-            android:screenOrientation="sensorLandscape">
+            android:name=".LauncherActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The game itself; started only from the start screen (explicit intent). -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:screenOrientation="sensorLandscape" />
     </application>
 </manifest>

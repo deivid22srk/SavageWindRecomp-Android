@@ -66,23 +66,33 @@ extraídos e descriptografados (o `main` do ExeFS é um NSO já aberto).
 
 ## Drivers gráficos (Turnip / AdrenoTools)
 
-Em aparelhos **Qualcomm Adreno** (arm64-v8a), a tela de configuração (Settings → primeira aba,
-seção **"Graphics drivers"**) permite substituir o driver Vulkan do sistema por um driver
-**Turnip** (Mesa freedreno), via [libadrenotools](https://github.com/bylaws/libadrenotools).
-Em outros aparelhos (Mali, Xclipse...) a opção fica oculta e o driver do sistema é sempre usado.
+Em aparelhos **Qualcomm Adreno** (arm64-v8a), a **tela inicial do app** (Java, antes do jogo
+abrir) e a tela de configuração do jogo (Settings → primeira aba, seção **"Graphics drivers"**)
+permitem substituir o driver Vulkan do sistema por um driver **Turnip** (Mesa freedreno), via
+[libadrenotools](https://github.com/bylaws/libadrenotools). Em outros aparelhos (Mali,
+Xclipse...) a opção fica oculta e o driver do sistema é sempre usado.
+
+A tela inicial existe porque a própria UI do jogo já depende do Vulkan: em aparelhos em que o
+driver do sistema não chega ao Vulkan 1.3 (um Adreno 6xx reporta Vulkan 1.1, por exemplo), o
+jogo encerra com `FATAL: no Vulkan 1.3 device` antes de qualquer painel interno ser alcançável —
+a escolha do driver precisa existir **antes** do jogo abrir, num lugar que nunca toca no Vulkan.
 
 **Como importar um driver:**
 
 1. Baixe um pacote de driver Turnip no formato padrão dos emuladores Android: um **`.zip`
    contendo `meta.json` e a biblioteca do driver** (campos usuais: `name`, `description`,
    `author`, `vendor`, `driverVersion`, `minApi` e `libraryName` — o nome do `.so`).
-2. Abra **Settings → Graphics drivers → "Import driver (.zip)"** e escolha o arquivo.
-   O app valida o pacote antes de extrair: `meta.json` presente, `libraryName` declarado,
-   `minApi` compatível, a biblioteca deve ser um **ELF 64-bit AArch64**, tamanho limitado, e
-   caminhos perigosos dentro do zip (`..`, absolutos) são rejeitados.
-3. Selecione o driver importado na lista (ou volte em **"System driver (default)"**).
-4. **Reinicie o app para aplicar.** O driver só pode ser trocado antes de qualquer uso do
-   Vulkan, então a escolha vale a partir da próxima abertura do Savage Wind — a tela avisa isso.
+2. Abra o app: a **tela inicial** traz a seção do driver gráfico. Toque em **"Import driver
+   (.zip)"** e escolha o arquivo. O app valida o pacote antes de extrair: `meta.json` presente,
+   `libraryName` declarado, `minApi` compatível, a biblioteca deve ser um **ELF 64-bit
+   AArch64**, tamanho limitado, e caminhos perigosos dentro do zip (`..`, absolutos) são
+   rejeitados. O driver importado já fica selecionado para a próxima abertura.
+3. Toque em **"START GAME"** para iniciar com o driver escolhido. Na mesma lista dá para
+   trocar o driver ou voltar para **"System driver (default)"** (o driver do sistema), e o
+   botão **"Remove"** apaga um pacote importado.
+4. A troca de driver só pode acontecer antes de qualquer uso do Vulkan, então ela vive na tela
+   inicial (e também na seção **"Graphics drivers"** do jogo, para quando o jogo já abre). O
+   driver escolhido vale para a inicialização que vem em seguida — a tela avisa isso.
 
 O driver ativo é registrado no `bootlog.txt` (junto com o motivo de qualquer falha de boot), e
 se o driver não carregar, o app **cai automaticamente de volta no driver do sistema** — nunca
