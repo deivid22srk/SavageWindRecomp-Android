@@ -142,6 +142,7 @@ public class MainActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        sContext = this;  // pickFolder/pickFile (called from native threads) and Swgen need this
         noteBootAttempt();
         File root = getExternalFilesDir(null);
         if (root == null) root = getFilesDir();
@@ -415,6 +416,10 @@ public class MainActivity extends SDLActivity {
     // primary storage, so the original C setup code can read it directly.
     public static void pickFolder() {
         final MainActivity a = (MainActivity) sContext;
+        if (a == null) {  // native thread got here before onCreate finished: answer "cancelled" instead of dying
+            nativeOnPicked(REQ_PICK_FOLDER, null);
+            return;
+        }
         a.runOnUiThread(() -> {
             Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -424,6 +429,10 @@ public class MainActivity extends SDLActivity {
 
     public static void pickFile() {
         final MainActivity a = (MainActivity) sContext;
+        if (a == null) {
+            nativeOnPicked(REQ_PICK_FILE, null);
+            return;
+        }
         a.runOnUiThread(() -> {
             Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             i.addCategory(Intent.CATEGORY_OPENABLE);

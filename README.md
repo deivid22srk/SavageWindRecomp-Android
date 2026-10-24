@@ -62,7 +62,10 @@ compila para Android via **GitHub Actions** — o APK é gerado na nuvem, nunca 
    configuração (Play, opções, apagar arquivos do jogo).
 
 Sem `prod.keys`: o app não descriptografa nada. Todos os arquivos que ele lê já devem estar
-extraídos e descriptografados (o `main` do ExeFS é um NSO já aberto).
+extraídos e descriptografados (o `main` do ExeFS é um NSO já aberto). **Não adianta apontar
+para um `.nsp` ou `.xci`**: o app não abre contêineres — extraia a sua cópia para a pasta
+`exefs/` + `romfs/` (por exemplo com um dump feito no emulador ou no próprio Switch) e
+escolha essa pasta no "Game files folder".
 
 ## Drivers gráficos (Turnip / AdrenoTools)
 
