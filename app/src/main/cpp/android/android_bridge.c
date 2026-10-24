@@ -6,6 +6,7 @@
 #include <jni.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include <SDL3/SDL.h>  // SDL_DialogFileCallback
@@ -19,6 +20,7 @@ static jclass g_clsMain;        // MainActivity
 static jclass g_clsSwgen;       // Swgen
 static jmethodID g_mPickFolder, g_mPickFile;
 static jmethodID g_mSwgenRun;
+static jmethodID g_mUnpackDriverZip;  // (String zip, String dest) -> String error-or-null
 
 // Pending dialog callbacks from runtime/ui/launcher.mm (SDL's dialog API is async).
 static SDL_DialogFileCallback g_pending[2];  // 0 = folder (REQ 41), 1 = file (REQ 42)
@@ -82,6 +84,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_clsMain = (jclass)(*env)->NewGlobalRef(env, main);
     g_mPickFolder = (*env)->GetStaticMethodID(env, main, "pickFolder", "()V");
     g_mPickFile = (*env)->GetStaticMethodID(env, main, "pickFile", "()V");
+    g_mUnpackDriverZip = (*env)->GetStaticMethodID(env, main, "unpackDriverZip",
+                                                   "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
     jclass swgen = (*env)->FindClass(env, "com/deivid22srk/savagewind/Swgen");
     if (swgen) {
@@ -103,6 +107,31 @@ void plat_pick_file(void) {
     JNIEnv *env = thread_env();
     if (!env || !g_mPickFile) return;
     (*env)->CallStaticVoidMethod(env, g_clsMain, g_mPickFile);
+}
+
+// ------------------------------------------------------------------ graphics drivers (C -> Java)
+// Validate and unpack a Turnip driver .zip into dest (Java does the zip handling, the JSON
+// validation and the zip-slip checks; see MainActivity.unpackDriverZip). On success dest holds
+// meta.txt + the driver library and err is untouched; else err says why. All or nothing.
+bool android_driver_import(const char *zip, const char *dest, char *err, size_t errn) {
+    JNIEnv *env = thread_env();
+    if (!env || !g_mUnpackDriverZip) {
+        snprintf(err, errn, "the Java driver importer is unavailable");
+        return false;
+    }
+    jstring jzip = (*env)->NewStringUTF(env, zip);
+    jstring jdest = (*env)->NewStringUTF(env, dest);
+    jstring jerr = (jstring)(*env)->CallStaticObjectMethod(env, g_clsMain, g_mUnpackDriverZip, jzip, jdest);
+    (*env)->DeleteLocalRef(env, jzip);
+    (*env)->DeleteLocalRef(env, jdest);
+    bool ok = jerr == NULL;
+    if (!ok) {
+        const char *c = (*env)->GetStringUTFChars(env, jerr, NULL);
+        snprintf(err, errn, "%s", c ? c : "import failed");
+        if (c) (*env)->ReleaseStringUTFChars(env, jerr, c);
+    }
+    if (jerr) (*env)->DeleteLocalRef(env, jerr);
+    return ok;
 }
 
 void plat_register_dialog_callback(int which, PlatDialogCallback cb, void *userdata) {

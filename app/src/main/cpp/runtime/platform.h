@@ -55,6 +55,11 @@ typedef void (*PlatDialogCallback)(void *userdata, const char *const *filelist, 
 void plat_pick_folder(void);
 void plat_pick_file(void);
 void plat_register_dialog_callback(int which, PlatDialogCallback cb, void *userdata);
+// Custom Vulkan drivers (AdrenoTools / Turnip): android_driver_import lives in the JNI bridge,
+// the Vulkan state in cpp/android/vulkan_shims.c.
+bool android_driver_import(const char *zip, const char *dest, char *err, size_t errn);
+bool plat_vk_custom_driver_active(void);  // this run started with a custom driver
+void plat_vk_gpu_name(char *out, size_t size);  // the active driver's GPU name (cached probe)
 #endif
 #ifdef _WIN32
 #define PLAT_EXE_SUFFIX ".exe"

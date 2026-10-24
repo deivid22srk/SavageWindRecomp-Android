@@ -17,8 +17,10 @@
 #include <SDL3/SDL.h>
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <pthread.h>
 #include <string>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -403,6 +405,189 @@ static void remove_fonts() {
     g_font_msg = tr("Imported fonts removed: the substitute font is used.");
 }
 
+// ------------------------------------------------------------------ graphics drivers (Android)
+// Turnip (Mesa freedreno) driver packages for Adreno GPUs, loaded through libadrenotools the
+// next time the app starts: the choice is exported as environment variables before anything
+// touches Vulkan (MainActivity.setupDriverEnv), and cpp/android/vulkan_shims.c applies it when
+// the first Vulkan instance is created. A package is a .zip with meta.json (name, author,
+// driverVersion, libraryName, ...) and the driver .so - the format the other Android emulators
+// import. On non-Adreno devices this panel stays hidden and the system driver is used.
+#ifdef __ANDROID__
+struct DriverEntry {
+    std::string dir, name, author, version, library;
+};
+
+static std::vector<DriverEntry> driver_list() {
+    std::vector<DriverEntry> out;
+    const char *files = getenv("SAVAGEWIND_FILES_DIR");
+    if (!files || !*files) return out;
+    char root[1024];
+    snprintf(root, sizeof root, "%s/drivers", files);
+    DIR *d = opendir(root);
+    if (!d) return out;
+    for (struct dirent *e; (e = readdir(d)); ) {
+        if (e->d_name[0] == '.') continue;
+        char path[1100];
+        snprintf(path, sizeof path, "%s/%s/meta.txt", root, e->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        DriverEntry de;
+        de.dir = e->d_name;
+        char line[512];
+        while (fgets(line, sizeof line, f)) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = 0;
+            char *v = strchr(line, '=');
+            if (!v) continue;
+            *v = 0, v++;
+            if (!strcmp(line, "name")) de.name = v;
+            else if (!strcmp(line, "author")) de.author = v;
+            else if (!strcmp(line, "driverVersion")) de.version = v;
+            else if (!strcmp(line, "libraryName")) de.library = v;
+        }
+        fclose(f);
+        if (!de.name.empty() && !de.library.empty()) out.push_back(de);
+    }
+    closedir(d);
+    return out;
+}
+
+static std::string driver_active_id() {  // "" = the system driver
+    const char *files = getenv("SAVAGEWIND_FILES_DIR");
+    if (!files) return "";
+    char path[1024];
+    snprintf(path, sizeof path, "%s/drivers/active.txt", files);
+    FILE *f = fopen(path, "r");
+    if (!f) return "";
+    char line[512];
+    std::string id;
+    while (fgets(line, sizeof line, f))
+        if (!strncmp(line, "dir=", 4)) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = 0;
+            const char *base = strrchr(line + 4, '/');
+            id = base ? base + 1 : line + 4;
+        }
+    fclose(f);
+    return id;
+}
+
+// id "" (or an empty lib) goes back to the system driver: active.txt is simply removed. The
+// applied choice only takes effect on the next app start - the driver is loaded before Vulkan.
+static bool driver_set_active(const std::string &id, const std::string &lib) {
+    const char *files = getenv("SAVAGEWIND_FILES_DIR");
+    if (!files) return false;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/drivers/active.txt", files);
+    if (id.empty() || lib.empty()) return unlink(path) == 0 || errno == ENOENT;
+    FILE *f = fopen(path, "w");
+    if (!f) return false;
+    fprintf(f, "dir=%s/drivers/%s\nlib=%s\n", files, id.c_str(), lib.c_str());
+    fclose(f);
+    return true;
+}
+
+static std::string g_driver_msg;
+static std::atomic<bool> g_driver_importing{false};
+
+static void *driver_import_run(void *arg) {
+    char *zip = (char *)arg;
+    const char *files = getenv("SAVAGEWIND_FILES_DIR");
+    std::string msg;
+    if (files && *files) {
+        // Folder id: the .zip's base name, sanitized, plus a short hash so two imports of the
+        // same name never overwrite each other's files.
+        std::string base = zip;
+        base = base.substr(base.find_last_of('/') + 1);
+        if (base.size() > 4 && !strcasecmp(base.c_str() + base.size() - 4, ".zip")) base.resize(base.size() - 4);
+        for (auto &c : base)
+            if (!isalnum((unsigned char)c) && c != '_' && c != '-' && c != '.') c = '_';
+        if (base.empty()) base = "driver";
+        uint64_t h = 1469598103934665603ull;
+        for (const char *c = zip; *c; c++) h = (h ^ (unsigned char)*c) * 1099511628211ull;
+        char dir[1200];
+        snprintf(dir, sizeof dir, "%s/drivers/%s-%llx", files, base.c_str(), (unsigned long long)(h >> 32));
+
+        char err[512] = "";
+        bool ok = android_driver_import(zip, dir, err, sizeof err);
+        if (ok) msg = tr("Driver imported. Select it below - it applies the next time Savage Wind starts.");
+        else {
+            plat_remove_tree(dir);  // all or nothing
+            msg = std::string(tr("The driver package was rejected: ")) + err;
+        }
+    } else {
+        msg = tr("The app's files directory is unknown.");
+    }
+    free(zip);
+    pthread_mutex_lock(&g_lock);
+    g_driver_msg = msg;
+    pthread_mutex_unlock(&g_lock);
+    g_driver_importing.store(false);
+    return NULL;
+}
+
+static void SDLCALL picked_driver(void *, const char *const *files, int) {
+    if (!files || !files[0]) return;
+    if (g_driver_importing.exchange(true)) return;
+    pthread_t th;
+    char *dup = strdup(files[0]);
+    if (!dup) { g_driver_importing.store(false); return; }
+    g_driver_msg.clear();
+    if (pthread_create(&th, NULL, driver_import_run, dup) != 0) {
+        free(dup);
+        g_driver_importing.store(false);
+    } else {
+        pthread_detach(th);
+    }
+}
+
+static void drivers_ui(float sc) {
+    char gpu[128];
+    plat_vk_gpu_name(gpu, sizeof gpu);
+    ImGui::Text("%s %s", tr("Active GPU:"), gpu);
+    if (plat_vk_custom_driver_active()) ImGui::TextDisabled("%s", tr("(a custom driver was applied at this app start)"));
+    ImGui::TextDisabled("%s", tr("Turnip drivers replace the system's Adreno driver. Only import packages made for "
+                                 "your GPU (Adreno 6xx/7xx); a driver that fails to load falls back to the system one."));
+    ImGui::Spacing();
+
+    std::string active = driver_active_id();
+    if (ImGui::RadioButton(tr("System driver (default)"), active.empty()) && !active.empty()) {
+        driver_set_active("", "");
+        g_driver_msg = tr("Back to the system driver - it applies the next time Savage Wind starts.");
+    }
+    for (auto &de : driver_list()) {
+        std::string label = de.name + (de.version.empty() ? "" : " " + de.version) +
+                            (de.author.empty() ? "" : "  (" + de.author + ")");
+        ImGui::PushID(de.dir.c_str());
+        bool sel = active == de.dir;
+        if (ImGui::RadioButton(label.c_str(), sel) && !sel) {
+            if (driver_set_active(de.dir, de.library))
+                g_driver_msg = tr("Driver selected - it applies the next time Savage Wind starts.");
+            else
+                g_driver_msg = tr("Could not save the driver choice.");
+        }
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 110 * sc);
+        if (ImGui::SmallButton(tr("Remove"))) {
+            plat_remove_tree((std::string(getenv("SAVAGEWIND_FILES_DIR") ? getenv("SAVAGEWIND_FILES_DIR") : "")
+                              + "/drivers/" + de.dir)
+                                 .c_str());
+            if (sel) driver_set_active("", "");
+            g_driver_msg = tr("Driver removed.");
+        }
+        ImGui::PopID();
+    }
+    ImGui::Spacing();
+    if (g_driver_importing.load()) ImGui::TextDisabled("%s", tr("Importing the driver package..."));
+    else if (ImGui::Button(tr("Import driver (.zip)"))) {
+        plat_register_dialog_callback(1, (PlatDialogCallback)picked_driver, NULL);
+        plat_pick_file();
+    }
+    pthread_mutex_lock(&g_lock);
+    if (!g_driver_msg.empty()) ImGui::Text("%s", g_driver_msg.c_str());
+    pthread_mutex_unlock(&g_lock);
+}
+#endif  // __ANDROID__
+
 // ------------------------------------------------------------------ screen
 static ImFont *g_font_title, *g_font_menu, *g_font_small;
 enum Page { MAIN, SETTINGS, SETUP };  // SETTINGS: the in-game menu's tabs (runtime/ui/menu.mm)
@@ -701,6 +886,12 @@ static void prelaunch_tab(float sc) {
         ImGui::SameLine();
         if (ImGui::Button(tr("Use substitute font"))) remove_fonts();
     }
+#ifdef __ANDROID__
+    ImGui::Spacing();
+    ImGui::Spacing();
+    heading("Graphics drivers");
+    drivers_ui(sc);
+#endif
 }
 
 // The start screen's fonts, with the menu language's glyphs that Latin fonts lack merged in (runtime/ui/i18n.mm); made

@@ -110,3 +110,23 @@ target_link_options(main PRIVATE "-Wl,-T,${ANDROID_DIR}/hle.ld")
 # dying silently (the system's fatal-signal report never reaches uid-filtered log captures).
 add_library(bootlog SHARED ${ANDROID_DIR}/bootlog.c)
 target_link_libraries(bootlog PRIVATE ${log-lib})
+
+# ------------------------------------------------------------------ AdrenoTools (custom Vulkan drivers)
+# libadrenotools (a git submodule, with its own linkernsbypass submodule - checkouts need
+# --recursive) lets the user run Mesa Turnip instead of the system Adreno driver, applied by the
+# Vulkan shims (android/vulkan_shims.c) before the first instance is created. Its shared hook
+# libraries (libhook_impl.so and friends) are built as ordinary CMake targets, so AGP packages
+# them in the APK next to libmain.so - hookLibDir is nativeLibraryDir.
+if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a" AND
+   EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/adrenotools/CMakeLists.txt)
+    set(BUILD_SHARED_LIBS ON)
+    set(CMAKE_CXX_STANDARD 17)
+    set(ADRENOTOOLS_BUILD ${CMAKE_CURRENT_BINARY_DIR}/adrenotools-build)
+    add_subdirectory(third_party/adrenotools ${ADRENOTOOLS_BUILD})
+    target_compile_definitions(main PRIVATE HAVE_ADRENOTOOLS=1)
+    target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/adrenotools/include)
+    target_link_libraries(main PRIVATE adrenotools)
+    message(STATUS "AdrenoTools: custom Vulkan driver support enabled (arm64-v8a)")
+else()
+    message(STATUS "AdrenoTools: not available (submodule missing or non-arm64 build) - system driver only")
+endif()

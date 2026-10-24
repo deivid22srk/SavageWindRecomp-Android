@@ -1,26 +1,37 @@
 package com.deivid22srk.savagewind;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import android.app.AlertDialog;
-import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.system.Os;
+import android.text.method.ScrollingMovementMethod;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.chaquo.python.android.AndroidPlatform;
 import com.chaquo.python.Python;
 
 import org.libsdl.app.SDLActivity;
+
+import org.json.JSONObject;
 
 /**
  * Savage Wind (Android port of SavageWindRecomp).
@@ -37,6 +48,80 @@ public class MainActivity extends SDLActivity {
 
     static Context sContext;  // package-private: Swgen reads it
     private static File sBootLog;
+
+    // ------------------------------------------------------------------ restart-loop guard
+    // A native death during the libraries' load leaves nothing in the log the app could catch:
+    // the process is simply gone, and the system starts it again. If boot fails repeatedly and
+    // fast, stop relaunching and show what the boot log recorded instead.
+    private static final int FAILS_BEFORE_DIAGNOSTIC = 3;
+    private static final long FAIL_WINDOW_MS = 10000;
+    private int mBootFails;
+
+    private void noteBootAttempt() {
+        SharedPreferences p = getSharedPreferences("sw_boot", MODE_PRIVATE);
+        long now = SystemClock.elapsedRealtime();
+        long last = p.getLong("fail_t", -FAIL_WINDOW_MS);
+        mBootFails = (now - last) < FAIL_WINDOW_MS ? p.getInt("fail_n", 0) + 1 : 1;
+        p.edit().putLong("fail_t", now).putInt("fail_n", mBootFails).apply();
+    }
+
+    private void clearBootFails() {
+        mBootFails = 0;
+        getSharedPreferences("sw_boot", MODE_PRIVATE).edit().remove("fail_t").remove("fail_n").apply();
+    }
+
+    // The diagnostic screen: what the boot log (and the runtime's own savagewind.log, when it got
+    // far enough) recorded, with a copy button. No relaunch loop past this point.
+    private void showBootDiagnostic() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(readTail(sBootLog, 64));
+        File swlog = new File(getExternalFilesDir(null), "savagewind.log");
+        if (swlog.isFile()) sb.append("\n---- savagewind.log ----\n").append(readTail(swlog, 64));
+        String text = sb.length() > 0 ? sb.toString() : "(the boot log is empty)";
+        bootLog("loop: " + mBootFails + " failed starts in a row - showing diagnostics instead of restarting");
+        runOnUiThread(() -> {
+            TextView tv = new TextView(this);
+            tv.setText(text);
+            tv.setTextIsSelectable(true);
+            tv.setMovementMethod(new ScrollingMovementMethod());
+            tv.setTextSize(12f);
+            tv.setPadding(48, 32, 48, 32);
+            new AlertDialog.Builder(this)
+                    .setTitle("Savage Wind won't start")
+                    .setMessage("The app failed " + mBootFails + " times in a row. Below is what was recorded "
+                            + "before each failure (bootlog.txt).")
+                    .setView(tv)
+                    .setPositiveButton("Copy", (d, w) -> {
+                        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                        cm.setPrimaryClip(ClipData.newPlainText("Savage Wind boot log", text));
+                        Toast.makeText(this, "Log copied", Toast.LENGTH_SHORT).show();
+                    })
+                    .setNeutralButton("Try again", (d, w) -> {
+                        clearBootFails();
+                        recreate();
+                    })
+                    .setNegativeButton("Close", (d, w) -> finish())
+                    .setCancelable(false)
+                    .show();
+        });
+    }
+
+    private static String readTail(File f, int maxLines) {
+        if (f == null || !f.isFile()) return "";
+        try (InputStream in = new FileInputStream(f)) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1 << 16];
+            int n, total = 0;
+            while ((n = in.read(buf)) > 0 && total < (1 << 20)) { out.write(buf, 0, n); total += n; }
+            String[] lines = out.toString("UTF-8").split("\n");
+            StringBuilder sb = new StringBuilder();
+            int from = Math.max(0, lines.length - maxLines);
+            for (int i = from; i < lines.length; i++) sb.append(lines[i]).append('\n');
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
     static {
         // The libraries themselves are loaded by SDLActivity (getLibraries(): bootlog, SDL3, main).
@@ -57,10 +142,15 @@ public class MainActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        noteBootAttempt();
         File root = getExternalFilesDir(null);
         if (root == null) root = getFilesDir();
         sBootLog = new File(root, "bootlog.txt");
-        bootLog("app: onCreate begin");
+        bootLog("app: onCreate begin (attempt " + mBootFails + ")");
+        if (mBootFails >= FAILS_BEFORE_DIAGNOSTIC) {
+            showBootDiagnostic();
+            return;  // no super.onCreate: the restart loop stops here
+        }
         try {
             // Read before the SDL thread starts: the runtime's paths.c picks the data root
             // up from SAVAGEWIND_DATA_ROOT. The compiler is the clang shipped inside the APK
@@ -73,6 +163,7 @@ public class MainActivity extends SDLActivity {
             Os.setenv("SAVAGEWIND_CRASHLOG", sBootLog.getAbsolutePath(), true);
             Os.setenv("SAVAGEWIND_LIB_DIR", libdir, true);
             Os.setenv("SAVAGEWIND_CC", libdir + "/libclang.so", true);
+            Os.setenv("SAVAGEWIND_FILES_DIR", getFilesDir().getAbsolutePath(), true);
             File bin = new File(getFilesDir(), "bin");
             bin.mkdirs();
             try {
@@ -86,6 +177,7 @@ public class MainActivity extends SDLActivity {
             Os.setenv("TMPDIR", getCacheDir().getAbsolutePath(), true);
             bootLog("env: data_root=" + root + " libdir=" + libdir + " bin=" + bin
                     + " ld.lld->" + (new File(bin, "ld.lld").exists() ? "ok" : "missing"));
+            setupDriverEnv();
         } catch (Exception e) {
             bootLog("env: setup FAILED: " + e);
         }
@@ -104,8 +196,125 @@ public class MainActivity extends SDLActivity {
         bootLog("sdl: entering SDLActivity.onCreate (loads bootlog, SDL3, main)");
         super.onCreate(savedInstanceState);
         bootLog("sdl: SDLActivity.onCreate returned");
+        clearBootFails();  // the risky part (native library load) is behind us: reset the loop guard
         nativeSetContext(this);
         bootLog("native: context set");
+    }
+
+    // ------------------------------------------------------------------ graphics driver (AdrenoTools)
+    // The Turnip driver has to be in place before anything touches Vulkan, and the choice is a
+    // plain file the start screen's driver panel writes (files/drivers/active.txt: dir= and lib=).
+    // Whatever is selected here is exported as environment variables; libmain's Vulkan shims read
+    // them the first time the runtime creates a Vulkan instance.
+    private void setupDriverEnv() {
+        try {
+            File active = new File(new File(getFilesDir(), "drivers"), "active.txt");
+            if (!active.isFile()) return;
+            String dir = null, lib = null;
+            try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(active))) {
+                for (String line; (line = r.readLine()) != null; ) {
+                    if (line.startsWith("dir=")) dir = line.substring(4).trim();
+                    else if (line.startsWith("lib=")) lib = line.substring(4).trim();
+                }
+            }
+            if (dir == null || lib == null || dir.isEmpty() || lib.isEmpty()) {
+                bootLog("driver: active.txt is incomplete - using the system driver");
+                return;
+            }
+            File dirF = new File(dir), libF = new File(dirF, lib);
+            if (!dirF.isDirectory() || !libF.isFile()) {  // the driver was removed under us
+                bootLog("driver: " + dir + " is gone - falling back to the system driver");
+                active.delete();
+                return;
+            }
+            Os.setenv("SAVAGEWIND_VK_DRIVER_DIR", dirF.getAbsolutePath() + "/", true);
+            Os.setenv("SAVAGEWIND_VK_DRIVER_LIB", lib, true);
+            bootLog("driver: custom Vulkan driver for this run: " + dir + " (" + lib + ")");
+        } catch (Exception e) {
+            bootLog("driver: setup FAILED: " + e);
+        }
+    }
+
+    // Called from libmain (cpp/android/android_bridge.c): validate a Turnip driver .zip chosen in
+    // the driver panel and unpack it into destDir. Returns null on success, else the reason.
+    // Limits and checks: entry count and sizes, zip-slip (.. / absolute / .. paths), meta.json
+    // with the usual driver-package fields, and the library itself must be a 64-bit AArch64 ELF.
+    public static String unpackDriverZip(String zipPath, String destDir) {
+        final int MAX_ENTRIES = 200, MAX_TOTAL = 512 << 20, MAX_FILE = 400 << 20;
+        File dest = new File(destDir);
+        try {
+            String meta = null;
+            long total = 0;
+            int entries = 0;
+            try (ZipInputStream z = new ZipInputStream(new FileInputStream(zipPath))) {
+                for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
+                    if (++entries > MAX_ENTRIES) return "the .zip has too many files";
+                    String name = e.getName();
+                    if (name == null || name.isEmpty()) continue;
+                    if (name.contains("..") || name.startsWith("/") || name.contains("\\"))
+                        return "unsafe path inside the .zip: " + name;
+                    File out = new File(dest, name);
+                    if (!out.getCanonicalPath().startsWith(dest.getCanonicalPath() + File.separator))
+                        return "unsafe path inside the .zip: " + name;
+                    if (e.isDirectory()) { out.mkdirs(); continue; }
+                    out.getParentFile().mkdirs();
+                    long size = 0;
+                    try (OutputStream o = new FileOutputStream(out)) {
+                        byte[] buf = new byte[1 << 16];
+                        for (int n; (n = z.read(buf)) > 0; ) {
+                            size += n;
+                            total += n;
+                            if (size > MAX_FILE || total > MAX_TOTAL) return "the .zip is too large";
+                            o.write(buf, 0, n);
+                        }
+                    }
+                    if (name.equals("meta.json")) meta = out.getPath();
+                }
+            }
+            if (meta == null) return "the .zip has no meta.json";
+            String metaText = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(meta)), "UTF-8");
+            JSONObject m = new JSONObject(metaText);
+            String lib = m.optString("libraryName", "");
+            if (lib.isEmpty()) return "meta.json has no libraryName";
+            if (lib.contains("/") || lib.contains("..")) return "bad libraryName: " + lib;
+            File libF = new File(dest, lib);
+            if (!libF.isFile()) return "the driver library " + lib + " is not in the .zip";
+            int minApi = m.optInt("minApi", 0);
+            if (minApi > android.os.Build.VERSION.SDK_INT)
+                return "this driver needs Android " + minApi + "+";
+            // The library must be an ELF64 AArch64 image (e_ident class 2, little-endian, EM_AARCH64).
+            try (InputStream in = new FileInputStream(libF)) {
+                byte[] h = new byte[20];
+                if (in.read(h) != h.length) return lib + " is not a valid ELF";
+                if (h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F') return lib + " is not an ELF";
+                if (h[4] != 2) return lib + " is not a 64-bit ELF";
+                if (h[5] != 1) return lib + " is not a little-endian ELF";
+                int machine = (h[19] & 0xff) << 8 | (h[18] & 0xff);
+                if (machine != 183) return lib + " is not an AArch64 ELF (this app only supports arm64 devices)";
+            }
+            // meta.txt: the plain key=value form the native driver panel reads (no JSON parser there)
+            try (OutputStream o = new FileOutputStream(new File(dest, "meta.txt"))) {
+                String[] keys = {"name", "description", "author", "vendor", "driverVersion", "libraryName"};
+                StringBuilder sb = new StringBuilder();
+                for (String k : keys) {
+                    String v = m.optString(k, "");
+                    if (v.indexOf('\n') >= 0) v = v.replace('\n', ' ');
+                    sb.append(k).append('=').append(v).append('\n');
+                }
+                o.write(sb.toString().getBytes("UTF-8"));
+            }
+            return null;
+        } catch (Exception e) {
+            deleteTree(dest);
+            return e.getMessage() != null ? e.getMessage() : e.toString();
+        }
+    }
+
+    static boolean deleteTree(File f) {
+        if (f == null) return false;
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) deleteTree(k);
+        return f.delete();
     }
 
     // libbootlog first: it installs the signal handlers that record a native death while

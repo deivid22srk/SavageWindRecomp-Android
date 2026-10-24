@@ -36,8 +36,9 @@ compila para Android via **GitHub Actions** — o APK é gerado na nuvem, nunca 
 - Android 9 (API 28) ou mais novo, **arm64-v8a**
 - GPU com **Vulkan 1.3** (a maioria dos SoCs flagship de 2022+: Snapdragon 8 Gen 1+, Tensor G1+,
   Dimensity 9000+)
-- **Espaço de endereçamento de 48 bits** no kernel (a janela de memória do guest tem 12 GB fixos
-  em 0x7000000000; aparelhos com VA de 39 bits não conseguem alocá-la)
+- Espaço de endereçamento suficiente para a janela do guest (12,5 GB em `0x3000000000`):
+  aparelhos com VA de 39 bits (512 GB) **funcionam** — a janela fica longe das regiões que o
+  sistema usa (boot image do ART, bibliotecas no topo)
 - ~35 GB de espaço livre (cópia dos arquivos do jogo + imagem de dados + caches)
 - Muita paciência na primeira execução: a geração do código do jogo demora bastante
 
@@ -63,6 +64,30 @@ compila para Android via **GitHub Actions** — o APK é gerado na nuvem, nunca 
 Sem `prod.keys`: o app não descriptografa nada. Todos os arquivos que ele lê já devem estar
 extraídos e descriptografados (o `main` do ExeFS é um NSO já aberto).
 
+## Drivers gráficos (Turnip / AdrenoTools)
+
+Em aparelhos **Qualcomm Adreno** (arm64-v8a), a tela de configuração (Settings → primeira aba,
+seção **"Graphics drivers"**) permite substituir o driver Vulkan do sistema por um driver
+**Turnip** (Mesa freedreno), via [libadrenotools](https://github.com/bylaws/libadrenotools).
+Em outros aparelhos (Mali, Xclipse...) a opção fica oculta e o driver do sistema é sempre usado.
+
+**Como importar um driver:**
+
+1. Baixe um pacote de driver Turnip no formato padrão dos emuladores Android: um **`.zip`
+   contendo `meta.json` e a biblioteca do driver** (campos usuais: `name`, `description`,
+   `author`, `vendor`, `driverVersion`, `minApi` e `libraryName` — o nome do `.so`).
+2. Abra **Settings → Graphics drivers → "Import driver (.zip)"** e escolha o arquivo.
+   O app valida o pacote antes de extrair: `meta.json` presente, `libraryName` declarado,
+   `minApi` compatível, a biblioteca deve ser um **ELF 64-bit AArch64**, tamanho limitado, e
+   caminhos perigosos dentro do zip (`..`, absolutos) são rejeitados.
+3. Selecione o driver importado na lista (ou volte em **"System driver (default)"**).
+4. **Reinicie o app para aplicar.** O driver só pode ser trocado antes de qualquer uso do
+   Vulkan, então a escolha vale a partir da próxima abertura do Savage Wind — a tela avisa isso.
+
+O driver ativo é registrado no `bootlog.txt` (junto com o motivo de qualquer falha de boot), e
+se o driver não carregar, o app **cai automaticamente de volta no driver do sistema** — nunca
+fecha por causa disso. Para remover um driver importado, use o botão **"Remove"** da lista.
+
 ## Limitações conhecidas
 
 - **Geração do código no dispositivo**: o gerador (`tools/gen.py`) usa `unicorn` e `capstone`
@@ -70,8 +95,13 @@ extraídos e descriptografados (o `main` do ExeFS é um NSO já aberto).
   no aparelho depende de compilá-los (scripts/experimento em `scripts/build_wheels_android.sh`,
   em preparo). Sem os wheels, o setup copia e prepara tudo, mas a etapa de recompilação falha
   com a mensagem do log. Alternativa enquanto isso: acompanhe as issues.
-- **Aparelhos com VA de 39 bits** não alocam a janela do guest (mensagem clara no app).
+- **Espaço de endereçamento**: a janela do guest agora fica em `0x3000000000` no Android (a
+  antiga `0x7000000000` colidia com a boot image do ART herdada do zygote em vários aparelhos —
+  era a causa do crash em loop na abertura). Se mesmo assim a janela não couber no seu aparelho,
+  o app mostra o diagnóstico do boot em vez de reiniciar em loop.
 - **Vulkan 1.3** é obrigatório (sem fallback para GLES; o backend original é Vulkan-only).
+- Drivers Turnip: só em Adreno; a troca vale após reiniciar; não há download automático de
+  drivers dentro do app (importação local de `.zip` apenas).
 - Emulação x86 (ex.: BlueStacks) não é suportada — aparelhos físicos arm64 apenas.
 - Touch controla a UI; jogar com touch dentro do jogo é bruto — use um controle.
 
@@ -86,14 +116,21 @@ comentadas com `__ANDROID__`:
 - `runtime/gamebuild.c`: apenas `find_tools` ganhou ramo Android — o gerador roda via Chaquopy
   (JNI) e o compilador é um clang real embutido no APK (`SAVAGEWIND_CC`), todo o resto do fluxo
   de compilação/link (response files, jobs paralelos, logs) é o código original.
-- `runtime/main.c`: a reserva do espaço guest no Android falha com mensagem clara (não há
-  re-exec dentro de um app); `main` vira `sw_main` (chamado por `SDL_main`).
-- `runtime/platform.h`: include do `android_compat.h` + declarações dos seletores de pasta.
+- `runtime/main.c`: a reserva do espaço guest no Android grava o motivo da falha no boot log
+  (não há re-exec dentro de um app); `main` vira `sw_main` (chamado por `SDL_main`). A janela
+  guest passou a ter base por plataforma (`rt.h`): `0x3000000000` no Android/Linux,
+  `0x7000000000` no macOS/Windows, em sintonia com `tools/layout.py`.
+- `runtime/platform.h`: include do `android_compat.h` + declarações dos seletores de pasta e dos
+  helpers de driver (AdrenoTools).
 - `runtime/ui/launcher.mm`: os dois pontos de diálogo (`SDL_ShowOpenFolderDialog` /
-  `SDL_ShowOpenFileDialog`) usam a ponte SAF via JNI no Android.
+  `SDL_ShowOpenFileDialog`) usam a ponte SAF via JNI no Android; painel de **drivers gráficos**
+  (importar, selecionar, remover) na seção de drivers da tela de configuração.
 - `app/src/main/cpp/android/`: `android_main.c` (SDL_main), `android_bridge.c` (JNI: seletores,
-  dispatch do gerador), CMakeLists.txt (build do `libmain.so`).
-- `app/src/main/java/`: `MainActivity` (SAF, permissões, ambiente, unpack de assets) e `Swgen`
+  dispatch do gerador, importação de drivers), `bootlog.c` (diagnóstico de crash no boot),
+  `vulkan_shims.c` (entry points Vulkan 1.2/1.3 + aplicação do driver AdrenoTools antes da
+  primeira instância), CMakeLists.txt (build do `libmain.so` + libadrenotools).
+- `app/src/main/java/`: `MainActivity` (SAF, permissões, ambiente, unpack de assets, importação
+  e seleção de drivers, guardião contra loop de reinício com tela de diagnóstico) e `Swgen`
   (Chaquopy), com as classes Java do SDL3 3.4.16.
 - `scripts/build_deps_android.sh`: compila SDL3/FFmpeg/shaderc/VMA para Android e empacota o
   clang+lld do Termux como `lib*.so` (executáveis do APK no `nativeLibraryDir`).
@@ -114,6 +151,8 @@ Build local completo não é suportado de propósito — use o Actions.
 
 - [SavageWindRecomp](https://github.com/Revivedx/SavageWindRecomp) e
   [LAS Recomp](https://github.com/peiikai/LASRecomp) — MIT (runtime, gerador, arquitetura)
+- [libadrenotools](https://github.com/bylaws/libadrenotools) + linkernsbypass — BSD-2-Clause
+  (submódulo; a licença acompanha o código)
 - SDL3 — zlib · FFmpeg — LGPL-2.1+ (build mínimo, sem codecs GPL) ·
   shaderc/glslang/SPIRV-Tools — Apache-2.0/BSD · Dear ImGui — MIT ·
   Vulkan Memory Allocator — MIT · Fira Sans — OFL (menus) · clang/lld (Termux) — Apache-2.0/LLVM
