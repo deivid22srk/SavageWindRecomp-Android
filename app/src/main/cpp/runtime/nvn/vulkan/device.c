@@ -545,6 +545,33 @@ static void *pc_saver(void *arg) {
 }
 
 // ================================================================== swapchain
+static void recreate_surface(void);  // (below: the native window died under us)
+void vk_present_idle(void);          // (defined below the present thread)
+
+// Android tears the window's native surface down whenever the app is covered (the system folder
+// picker, home, a notification shade pull-down) and hands a fresh ANativeWindow back on return,
+// and a display flip the activity lock could not prevent does the same. Everything Vulkan bound
+// to the old surface is dead then (the capabilities query answers VK_ERROR_SURFACE_LOST_KHR),
+// so retire the swapchain and the surface and make a new surface from SDL's window; the
+// swapchain is built again by the next create_swapchain().
+static void recreate_surface(void) {
+    vk_present_idle();
+    if (g_vk.dev) vkDeviceWaitIdle(g_vk.dev);
+    for (uint32_t i = 0; i < g_vk.sc_count; i++)
+        if (g_vk.sc_views[i]) vkDestroyImageView(g_vk.dev, g_vk.sc_views[i], NULL);
+    g_vk.sc_count = 0;
+    if (g_vk.swapchain) {
+        vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
+        g_vk.swapchain = VK_NULL_HANDLE;
+    }
+    if (g_vk.surface) {
+        SDL_Vulkan_DestroySurface(g_vk.inst, g_vk.surface, NULL);
+        g_vk.surface = VK_NULL_HANDLE;
+    }
+    if (!SDL_Vulkan_CreateSurface(window, g_vk.inst, NULL, &g_vk.surface))
+        LOG("[vk] SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+}
+
 static VkPresentModeKHR present_mode(void) {
     // MAILBOX by default: the game paces itself (vi.c's emulated 60 Hz vsync), and with FIFO every submission
     // queued behind the one waiting for a window image, so the game's fence waits followed the presentation engine:
@@ -564,7 +591,15 @@ static VkPresentModeKHR present_mode(void) {
 
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
+    VkResult cr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps);
+    if (cr != VK_SUCCESS) {
+        static int n;
+        if (n++ < 5 || n % 500 == 0) LOG("[vk] surface capabilities failed: %d - rebuilding the surface\n", cr);
+        recreate_surface();
+        if (!g_vk.surface) { g_vk.swapchain = VK_NULL_HANDLE; return; }  // covered: try again next frame
+        cr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps);
+        if (cr != VK_SUCCESS) { g_vk.swapchain = VK_NULL_HANDLE; return; }
+    }
     int w, h;
     SDL_GetWindowSizeInPixels(window, &w, &h);
     VkExtent2D ext = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : (VkExtent2D){(uint32_t)w, (uint32_t)h};
@@ -642,7 +677,8 @@ static void *present_thread(void *arg) {
         VkPresentInfoKHR pi = pres_info;
         pthread_mutex_unlock(&pres_m);
         VkResult r = vkQueuePresentKHR(g_vk.present_queue, &pi);
-        if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) atomic_store(&pres_stale, 1);
+        if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_SURFACE_LOST_KHR)
+            atomic_store(&pres_stale, 1);
         else if (r != VK_SUCCESS) { static int n; if (n++ < 5) LOG("[vk] present failed: %d\n", r); }
         pthread_mutex_lock(&pres_m);
         pres_busy = false;
@@ -674,7 +710,9 @@ static bool present_image(uint32_t img, VkSemaphore sem) {
         VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1, .pWaitSemaphores = &sem,
                                .swapchainCount = 1, .pSwapchains = &g_vk.swapchain, .pImageIndices = &img};
         VkResult r = vkQueuePresentKHR(g_vk.queue, &pi);
-        return !(r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR);
+        if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_SURFACE_LOST_KHR)
+            atomic_store(&pres_stale, 1);
+        return !(r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_SURFACE_LOST_KHR);
     }
     pthread_mutex_lock(&pres_m);
     while (pres_busy) pthread_cond_wait(&pres_cv, &pres_m);
@@ -745,7 +783,10 @@ bool vk_frame_begin(const float clear[4]) {
     uint64_t ta = SDL_GetTicksNS();
     VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
     g_present_split[0] += SDL_GetTicksNS() - ta;
-    if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+    // (a lost surface - the app was covered and Android tore the native window down - recovers
+    // the same way: recreate_swapchain asks for the capabilities, sees the loss, rebuilds the
+    // surface and then the swapchain)
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_ERROR_SURFACE_LOST_KHR) {
         recreate_swapchain();
         r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
     }

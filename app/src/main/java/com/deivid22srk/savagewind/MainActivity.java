@@ -15,6 +15,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -323,6 +324,19 @@ public class MainActivity extends SDLActivity {
     @Override
     protected String[] getLibraries() {
         return new String[] { "bootlog", "SDL3", "main" };
+    }
+
+    // SDL3 asks the system for FULL_USER whenever the game window is resizable (its
+    // setOrientationBis, called from native when the window is created), which lets the sensor
+    // flip the game to portrait right after launch when the phone is held upright: Android then
+    // tears the window's surface down and hands a new one back, and the first frame died on
+    // VK_ERROR_SURFACE_LOST_KHR ("surface capabilities failed: -1000000000"). The recomp renders
+    // a landscape-only UI (its window is 16:9), so whatever SDL requests, keep the manifest's
+    // sensorLandscape lock. (The native side now also survives the surface being replaced; this
+    // keeps the display steady so the swapchain is not rebuilt on every hand movement.)
+    @Override
+    public void setOrientationBis(int w, int h, boolean resizable, String hint) {
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
     }
 
     @Override
