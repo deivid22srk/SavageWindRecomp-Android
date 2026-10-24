@@ -396,9 +396,10 @@ public class LauncherActivity extends Activity {
     // ------------------------------------------------------------------ remove
     private void confirmRemove() {
         if (mActiveId.isEmpty()) return;
-        DriverInfo di = null;
-        for (DriverInfo d : mRowDriver.values()) if (d.id.equals(mActiveId)) di = d;
-        if (di == null) return;
+        DriverInfo found = null;
+        for (DriverInfo d : mRowDriver.values()) if (d.id.equals(mActiveId)) found = d;
+        if (found == null) return;
+        final DriverInfo di = found;  // captured by the dialog's lambda: must be effectively final
         new AlertDialog.Builder(this)
                 .setTitle("Remove driver")
                 .setMessage("Remove \"" + di.label() + "\" from the app? The game goes back to "
