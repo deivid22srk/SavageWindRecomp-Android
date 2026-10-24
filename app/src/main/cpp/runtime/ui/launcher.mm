@@ -124,9 +124,12 @@ static bool nso_build_id(const std::string &main_path, std::string *hex) {
     return true;
 }
 
-// The game version this build is made for: BOTW 1.8.2, told by its main module's build id (the first 8 bytes;
-// tools/sw_probe.py prints it). Other versions would need their own recompilation work.
-static const char *const SUPPORTED_MAIN[] = {"de0b6ac4efc1dda7"};
+// The game versions this build can run, told by main's build id (the first 8 of its 32 bytes; tools/sw_probe.py
+// prints it): the generator (runtime/gamebuild.c) makes the game code from whatever main it is given, so 1.0.0
+// runs too. What is made of one build's addresses stays 1.8.2-only and turns itself off for the others: the
+// hand-written patches (the generator skips them) and the runtime's frame pacing and in-game options pages
+// (runtime/hle/framepace.c, runtime/ui/game_options.mm gate on the game code's build id).
+static const char *const SUPPORTED_MAIN[] = {"de0b6ac4efc1dda7", "2094f152836683a3"};
 static bool supported_main(const std::string &id) {
     for (const char *s : SUPPORTED_MAIN)
         if (id == s) return true;
@@ -138,7 +141,7 @@ static std::string check_copied_files(const std::string &root) {
     if (!file_exists(root + "/exefs/main")) return "No game files";
     std::string id;
     if (!nso_build_id(root + "/exefs/main", &id)) return "Game files unreadable (exefs/main is not an NSO)";
-    if (!supported_main(id)) return "Game files aren't version 1.8.2";
+    if (!supported_main(id)) return "Game files aren't version 1.8.2 or 1.0.0";
     if (!is_dir(root + "/romfs") || !file_exists(root + "/romfs.bin")) return "Game data missing";
     return "";
 }
@@ -185,7 +188,7 @@ enum { FAIL_NOT_FOUND = 1, FAIL_UNUSABLE, FAIL_COPY, FAIL_VERSION, FAIL_MISSING,
 static void set_failure(int k) {
     static const char *const head[] = {"", "No game files found in that folder", "Those files can't be used",
                                        "Setup didn't finish", "The game's main module can't be read", "Game files incomplete",
-                                       "The game code didn't build", "Not version 1.8.2"};
+                                       "The game code didn't build", "Not version 1.8.2 or 1.0.0"};
     static const char *const hint[] = {
         "",
         "Choose the folder that holds the extracted game files (exefs and romfs).",
@@ -194,8 +197,9 @@ static void set_failure(int k) {
         "exefs/main must be the decrypted, extracted main module (an NSO file).",
         "Some files are missing. Choose the folder again; if it happens again, extract the game again.",
         "Make sure there's enough free space and try again. The log has the details.",
-        "Savage Wind needs the game updated to version 1.8.2: the 1.8.2 ExeFS and the RomFS with the update merged "
-        "in. Update the game on your console, extract it again and choose that folder."};
+        "Savage Wind runs the game at version 1.8.2 (the one it's made for) or at 1.0.0: the ExeFS of that version "
+        "and the RomFS, for 1.8.2 with the update merged in. Extract the game from your own copy and choose that "
+        "folder."};
     if (k >= 1 && k <= 7) set_job(head[k], true, hint[k]);
 }
 
@@ -1274,7 +1278,7 @@ extern "C" void launcher_run(const char *root, int mode) {
                 if (welcome && !busy) {  // what this is about, the first time
                     ImGui::PushTextWrapPos(0);
                     ImGui::TextColored(ImVec4(0.86f, 0.85f, 0.80f, 1), "%s",
-                                       tr("Savage Wind needs your own copy of the game, version 1.8.2. Choose the folder "
+                                       tr("Savage Wind needs your own copy of the game, version 1.8.2 or 1.0.0. Choose the folder "
                                           "with its extracted files and set them up: the game starts when it's done."));
                     ImGui::PopTextWrapPos();
                     ImGui::Dummy(ImVec2(0, 10 * sc));
@@ -1300,7 +1304,7 @@ extern "C" void launcher_run(const char *root, int mode) {
                     dl->AddLine(ImVec2(x + u * 0.35f, cy + u * 0.35f), ImVec2(x + u, cy - u * 0.4f), g, fs * 0.11f);
                 };
                 std::string src_d = tr("The folder with your own extracted game files: exefs (main, main.npdm, sdk...) and "
-                                       "romfs, version 1.8.2 with the update merged in. The game isn't included with Savage Wind.");
+                                       "romfs, version 1.8.2 or 1.0.0 (1.8.2 with the update merged in). The game isn't included with Savage Wind.");
                 if (!src.empty()) src_d += std::string("\n\n") + tr("Chosen:") + " " + src;
                 // the step that's running / its result, under the rows and in the Set up row's explanation
                 const std::string &job_line = job;

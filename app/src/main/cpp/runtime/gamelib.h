@@ -57,6 +57,10 @@ extern "C" {
 bool gamelib_load(const char *game_dir, char *why, size_t why_size);
 // The tables of the loaded library (NULL before gamelib_load succeeds).
 const GameLibTables *gamelib_tables(void);
+// The loaded library's main module's build id (NULL before a successful load; main is first in the load order).
+// The first 16 hex digits say the game version: "de0b6ac4efc1dda7" is 1.8.2, "2094f152836683a3" is 1.0.0. What
+// the runtime only knows at 1.8.2's addresses (runtime/hle/framepace.c) gates on this.
+const char *gamelib_main_build_id(void);
 // True when a library usable with this build is in one of those places (without loading it).
 bool gamelib_present(const char *game_dir);
 

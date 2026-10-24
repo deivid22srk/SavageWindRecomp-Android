@@ -50,6 +50,13 @@ extern volatile int g_movie_playing;  // runtime/hle/movie.c: video decoders run
 #define VF(T, base, off) (*(T *)(uintptr_t)((base) + (off)))
 #define PAUSE_STATE 0x7001cb48a4ull  // (u32: 0 playing, 2 in the pause menu or the map)
 
+// The main build the patches (tools/patches.py) and every fixed address in this file belong to: 1.8.2. The
+// launcher also takes game files of 1.0.0 (the generator makes the game code from whatever main it is given),
+// and there nothing here may touch the game: the game then keeps its own pacing and clock, as with
+// SAVAGEWIND_FRAMEPACE=0. The game code's main build id says which version is running (runtime/gamelib.c).
+#define PATCHED_MAIN "de0b6ac4efc1dda7"
+extern const char *gamelib_main_build_id(void);
+
 static int env_int(const char *name, int def) {
     const char *e = getenv(name);
     return e && *e ? atoi(e) : def;
@@ -58,7 +65,15 @@ static int env_int(const char *name, int def) {
 bool framepace_on(void) {
     static int on = -1;
     if (on < 0) on = env_int("SAVAGEWIND_FRAMEPACE", 1) != 0;
-    return on;
+    if (!on) return false;
+    const char *id = gamelib_main_build_id();  // NULL until the game code is loaded (nothing is paced before it is)
+    if (!id || strncmp(id, PATCHED_MAIN, 16)) {
+        static bool said;
+        if (id && !said)
+            said = true, LOG("[framepace] main %.16s is not 1.8.2: the game keeps its own pacing and clock\n", id);
+        return false;
+    }
+    return true;
 }
 
 // ------------------------------------------------------------------ the frame rate
@@ -88,8 +103,10 @@ int framepace_target(void) {
     int fps = forced >= 0 ? forced : g_settings.fps_limit;
     if (fps < 0) fps = FPS_DEFAULT;
     if (movie > 0 && __atomic_load_n(&g_movie_playing, __ATOMIC_RELAXED) > 0 && (fps == 0 || fps > movie)) fps = movie;
-    if (menu > 0 && (fps == 0 || fps > menu) && in_menu()) fps = menu;
-    if (event > 0 && (fps == 0 || fps > event) && in_event()) fps = event;
+    if (framepace_on()) {  // (in_menu and in_event read the game's memory: the fixed addresses are 1.8.2's)
+        if (menu > 0 && (fps == 0 || fps > menu) && in_menu()) fps = menu;
+        if (event > 0 && (fps == 0 || fps > event) && in_event()) fps = event;
+    }
     return fps;
 }
 

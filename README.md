@@ -13,11 +13,14 @@ compila para Android via **GitHub Actions** — o APK é gerado na nuvem, nunca 
 > são esperados — e relatórios de teste valem ouro (abra uma issue!).
 
 > [!IMPORTANT]
-> **Nenhum arquivo do jogo é incluído.** Você precisa da sua própria cópia de BOTW atualizada à
-> versão 1.8.2, extraída do seu próprio console (ExeFS + RomFS já descriptografados). O app
-> nunca descriptografa nada, não precisa de `prod.keys`/`title.keys` e lê apenas os arquivos
-> que você já extraiu. A recompilação do código do jogo acontece **no seu próprio dispositivo**,
-> a partir dos seus arquivos.
+> **Nenhum arquivo do jogo é incluído.** Você precisa da sua própria cópia de BOTW na versão
+> **1.8.2** (a versão-alvo) **ou 1.0.0**, extraída do seu próprio console (ExeFS + RomFS já
+> descriptografados). O app nunca descriptografa nada, não precisa de `prod.keys`/`title.keys` e
+> lê apenas os arquivos que você já extraiu. A recompilação do código do jogo acontece **no seu
+> próprio dispositivo**, a partir dos seus arquivos. O código do jogo é gerado do `main` que você
+> fornecer, então a 1.0.0 roda também — o que foi feito sobre endereços fixos da 1.8.2 (limite de
+> quadros/relógio do runtime e as páginas de opções dentro do jogo) fica desligado na 1.0.0 e o
+> jogo usa o próprio ritmo de 30/20 fps do console.
 
 ## Estado do port
 
@@ -53,11 +56,11 @@ compila para Android via **GitHub Actions** — o APK é gerado na nuvem, nunca 
    ```
    SavageWind/
      exefs/   main, main.npdm, rtld, sdk, subsdk0
-     romfs/   o RomFS completo (jogo base + 1.8.2 mesclados)
+     romfs/   o RomFS completo (jogo base + 1.8.2 mesclados; na 1.0.0, o jogo base)
    ```
 4. Abra o app → **"Game files folder"** → escolha a pasta com `exefs/` e `romfs/` →
-   **"Set up game files"**. O app confere a versão (1.8.2), copia os arquivos, monta a imagem de
-   dados e recompila o código do jogo no aparelho. Quando terminar, o jogo inicia.
+   **"Set up game files"**. O app confere a versão (1.8.2 ou 1.0.0), copia os arquivos, monta a
+   imagem de dados e recompila o código do jogo no aparelho. Quando terminar, o jogo inicia.
 5. Nas próximas vezes o jogo abre direto. **"Quit to Start Screen"** volta à tela de
    configuração (Play, opções, apagar arquivos do jogo).
 
@@ -175,7 +178,8 @@ Build local completo não é suportado de propósito — use o Actions.
 ---
 
 **English summary**: Android (arm64-v8a) port of SavageWindRecomp — the static recompilation of
-Breath of the Wild 1.8.2 — built entirely by GitHub Actions. The original sources are vendored
+Breath of the Wild (game versions 1.8.2 or 1.0.0; the runtime's frame pacing and in-game options
+pages stay 1.8.2-only) — built entirely by GitHub Actions. The original sources are vendored
 with surgical `#ifdef __ANDROID__` changes; game code is generated and compiled on-device from
 your own extracted game files (no keys, nothing decrypted, nothing bundled). See the sections
 above (Portuguese) for status, device requirements and usage; the workflow produces the APK as

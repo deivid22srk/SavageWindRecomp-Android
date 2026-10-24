@@ -488,6 +488,24 @@ class Module:
 
 from patches import PATCHES
 
+# The hand-written patches (patches.py) belong to one exact main build: 1.8.2, told by the first 8 bytes of its
+# build id. Every patch checks the instruction word it expects and fails loudly otherwise, so the launcher can
+# also take game files of another version it supports (1.0.0): those build without any of the patches, and the
+# runtime keeps its hands off that build's memory too (framepace.c gates on the same id; ui/game_options.mm and
+# the quit dialog are patch-driven, so they just don't exist there).
+PATCHED_MAIN = 'de0b6ac4efc1dda7'
+
+
+def use_patches(build_id):
+    """Keeps the patches on for the build they were made for, and drops them (with a note) for any other."""
+    if build_id.startswith(PATCHED_MAIN):
+        return True
+    if PATCHES:
+        print(f'gen.py: main build {build_id[:16]} is not {PATCHED_MAIN}: skipping all {len(PATCHES)} '
+              f'hand-written patches', file=sys.stderr)
+        PATCHES.clear()
+    return False
+
 
 def write_if_changed(path, text):
     """Leaves unchanged chunks untouched so make only recompiles what a patch affected."""
@@ -672,6 +690,8 @@ def main():
                 hle = args.hle
                 for n, base, size, build_id in lay:
                     args.hle = hle if n != 'main' else None
+                    if n == 'main':
+                        use_patches(build_id)
                     generate(n, os.path.join(exefs, n), base, os.path.join(outdir, n), args)
             return
         lay = {n: (b, i) for n, b, s, i in layout.read(args.paths[0])}
@@ -680,6 +700,8 @@ def main():
         base, build_id = lay[args.name]
         if header(args.input)['build_id'] != build_id:
             raise layout.LayoutError(f'{args.input} is not the {args.name} that {args.paths[0]} was made from')
+        if args.name == 'main':
+            use_patches(build_id)
         generate(args.name, args.input, base, args.paths[1], args)
     except layout.LayoutError as e:
         sys.exit(f'gen.py: {e}')

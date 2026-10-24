@@ -105,3 +105,8 @@ bool gamelib_load(const char *game_dir, char *why, size_t why_size) {
 }
 
 const GameLibTables *gamelib_tables(void) { return g_tables; }
+
+const char *gamelib_main_build_id(void) {
+    if (!g_tables || !*g_tables->nmodules) return NULL;
+    return g_tables->modules[0].build_id;  // main is first in the load order (gamelib.h)
+}
