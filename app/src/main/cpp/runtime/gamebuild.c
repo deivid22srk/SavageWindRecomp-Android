@@ -128,16 +128,31 @@ static bool find_tools_android(Tools *t) {
     const char *e = getenv("SAVAGEWIND_CC");
     if (!e || !*e) {
         const char *libdir = getenv("SAVAGEWIND_LIB_DIR");
-        if (!libdir || !*libdir) return false;
+        if (!libdir || !*libdir) {
+            LOG("[gamebuild] no compiler: SAVAGEWIND_CC and SAVAGEWIND_LIB_DIR are both unset\n");
+            return false;
+        }
         static char cc[1100];
         snprintf(cc, sizeof cc, "%s/libclang.so", libdir);
         e = cc;
     }
     snprintf(t->cc, sizeof t->cc, "%s", e);
-    if (!rt_resource("gamelib-src" SEP "cpu.h", NULL, t->inc, sizeof t->inc) ||
-        !rt_resource("gamelib-src" SEP "gamelib_entry.c", NULL, t->entry, sizeof t->entry) ||
-        !rt_resource("gamelib-src" SEP "hle_symbols.txt", NULL, t->hle, sizeof t->hle))
+    if (!file_exists(t->cc)) {
+        LOG("[gamebuild] the compiler is missing: %s\n", t->cc);
         return false;
+    }
+    if (!rt_resource("gamelib-src" SEP "cpu.h", NULL, t->inc, sizeof t->inc)) {
+        LOG("[gamebuild] gamelib-src/cpu.h not found (data root: %s)\n", rt_data_root());
+        return false;
+    }
+    if (!rt_resource("gamelib-src" SEP "gamelib_entry.c", NULL, t->entry, sizeof t->entry)) {
+        LOG("[gamebuild] gamelib-src/gamelib_entry.c not found (data root: %s)\n", rt_data_root());
+        return false;
+    }
+    if (!rt_resource("gamelib-src" SEP "hle_symbols.txt", NULL, t->hle, sizeof t->hle)) {
+        LOG("[gamebuild] gamelib-src/hle_symbols.txt not found (data root: %s)\n", rt_data_root());
+        return false;
+    }
     char *s = strrchr(t->inc, '/'), *b = strrchr(t->inc, '\\');
     if (b > s) s = b;
     if (s) *s = 0;
@@ -534,6 +549,18 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         {
             compiler(&a, &t);
             add_split(&a, GAMELIB_SHARED);
+#ifdef __ANDROID__
+            // The device compiler has no sysroot: no CRT startup objects and no -lc to add. The
+            // game code's libc calls and its calls into the runtime resolve when the library is
+            // loaded, through a DT_NEEDED on the libmain.so already in the process.
+            add(&a, "-nostdlib");
+            {
+                const char *libdir = getenv("SAVAGEWIND_LIB_DIR");
+                char ld[1200];
+                if (libdir && *libdir) { snprintf(ld, sizeof ld, "-L%s", libdir); add(&a, ld); }
+                add(&a, "-lmain");
+            }
+#endif
             add(&a, "-o");
             add(&a, tmp);
             add(&a, at);

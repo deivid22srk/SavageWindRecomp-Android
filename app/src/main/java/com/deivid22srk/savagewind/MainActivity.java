@@ -379,6 +379,10 @@ public class MainActivity extends SDLActivity {
         // on-device compile gets via -I, next to the runtime's own headers and the shims.
         copyTree("clang-include", new File(root, "gamelib-src"));
         copyTree("fonts", new File(root, "fonts"));
+        // the runtime's font lookup (rt_resource) searches the data root's top level for the
+        // bare file names: keep a flat copy beside the foldered one
+        copyOne("fonts/FiraSans-Medium.ttf", new File(root, "FiraSans-Medium.ttf"));
+        copyOne("fonts/FiraSans-SemiBold.ttf", new File(root, "FiraSans-SemiBold.ttf"));
         copyOne("icon.png", new File(root, "icon.png"));
     }
 

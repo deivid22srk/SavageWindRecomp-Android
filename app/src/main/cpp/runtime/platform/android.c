@@ -96,12 +96,14 @@ static void log_to_file(void) {
 
 void plat_init(void) { log_to_file(); }
 
-// The "exe" for rt_resource() lookups is the data root: MainActivity unpacks the shipped
-// resources (fonts, icon, gamelib-src headers, the compiler's headers) right there.
+// rt_resource() looks in the "exe's folder": the data root, where MainActivity unpacks the
+// shipped resources (icon, gamelib-src headers, the compiler's headers). rt_paths_init strips
+// the last component (on the desktops that is the binary's name), so report a phantom file
+// name inside the data root and g_exe_dir lands on the data root itself.
 bool plat_exe_path(char *buf, size_t size) {
     const char *env = getenv("SAVAGEWIND_DATA_ROOT");
     if (!env || !*env) return false;
-    snprintf(buf, size, "%s", env);
+    snprintf(buf, size, "%s/app", env);
     return true;
 }
 

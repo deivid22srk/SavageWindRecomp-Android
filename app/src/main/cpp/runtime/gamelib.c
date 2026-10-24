@@ -13,6 +13,40 @@
 #include "paths.h"
 #include "rt.h"
 
+#ifdef __ANDROID__
+#include <sys/syscall.h>
+#include <unistd.h>
+
+// The game files live on the app's storage, which the OS may refuse to map executable
+// (writable-and-executable app data, targetSdk 30+). The sanctioned way around it: load an
+// anonymous memfd copy through its /proc/self/fd name. Returns NULL (dlerror() says why).
+static void *android_dlopen_memfd(const char *path) {
+    int fd = (int)syscall(SYS_memfd_create, "swgame", 0u);
+    if (fd < 0) return NULL;
+    FILE *in = fopen(path, "rb");
+    if (!in) { close(fd); return NULL; }
+    char buf[1 << 16];
+    size_t n;
+    bool bad = false;
+    while (!bad && (n = fread(buf, 1, sizeof buf, in)) > 0) {
+        char *w = buf;
+        while (n) {
+            ssize_t k = write(fd, w, n);
+            if (k <= 0) { bad = true; break; }
+            w += k, n -= (size_t)k;
+        }
+    }
+    bad |= ferror(in) != 0;
+    fclose(in);
+    if (bad) { close(fd); return NULL; }
+    char fdpath[64];
+    snprintf(fdpath, sizeof fdpath, "/proc/self/fd/%d", fd);
+    void *h = dlopen(fdpath, RTLD_NOW | RTLD_LOCAL);
+    close(fd);  // the loaded mapping keeps the pages alive
+    return h;
+}
+#endif
+
 static const GameLibTables *g_tables;
 static char g_error[256];
 
@@ -62,7 +96,21 @@ static const GameLibTables *open_lib(const char *path) {
     GameLibEntry entry = (GameLibEntry)(void *)GetProcAddress(h, GAMELIB_ENTRY);
 #else
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#ifdef __ANDROID__
+    if (!h) {
+        char first[256];
+        snprintf(first, sizeof first, "%s", dlerror());
+        LOG("[gamelib] loading %s directly failed (%s) - trying an anonymous copy\n", path, first);
+        h = android_dlopen_memfd(path);
+        if (!h) {
+            LOG("[gamelib] the anonymous copy failed too: %s\n", dlerror());
+            snprintf(g_error, sizeof g_error, "%s", first);
+            return NULL;
+        }
+    }
+#else
     if (!h) { snprintf(g_error, sizeof g_error, "%s", dlerror()); return NULL; }
+#endif
     GameLibEntry entry = (GameLibEntry)dlsym(h, GAMELIB_ENTRY);
 #endif
     if (!entry) { snprintf(g_error, sizeof g_error, "%s: not game code", path); return NULL; }
