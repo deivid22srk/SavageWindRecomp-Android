@@ -76,7 +76,8 @@ __attribute__((constructor(101))) static void reserve_guest_space(void) {
              (unsigned long long)GUEST_LO, (unsigned long long)GUEST_HI, strerror(errno));
     fprintf(stderr, "FATAL: %s", msg);
     fflush(stderr);
-    if (const char *crashlog = getenv("SAVAGEWIND_CRASHLOG")) {  // the boot log Java reads for its diagnostics
+    const char *crashlog = getenv("SAVAGEWIND_CRASHLOG");  // the boot log Java reads for its diagnostics
+    if (crashlog) {
         int fd = open(crashlog, O_WRONLY | O_CREAT | O_APPEND, 0644);
         if (fd >= 0) {
             ssize_t w = write(fd, msg, strlen(msg));
