@@ -1,0 +1,3 @@
+[submodule "app/src/main/cpp/third_party/adrenotools"]
+	path = app/src/main/cpp/third_party/adrenotools
+	url = https://github.com/bylaws/libadrenotools

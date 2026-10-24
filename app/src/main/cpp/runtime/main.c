@@ -1,10 +1,13 @@
 // Savage Wind entry: load modules, set up the kernel, run nn::init::Start on the main thread.
 #include <SDL3/SDL.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "gamelib.h"
 #include "paths.h"
@@ -61,19 +64,34 @@ static void rtld_fini_main(Cpu *c) {
 // Claim the guest address range before anything else can map there. The host allocator places
 // regions at random addresses in the same window; on a collision, re-exec for a fresh layout.
 // (Android: no re-exec inside an app - the user closes and reopens it. A window that never fits
-// means a 39-bit-address-space device, which the game needs more than 256 GB of user VA for.)
+// means a device whose address space doesn't hold the game's layout; the failure is recorded to
+// the boot log first, so the app's start-up screen can show why instead of dying silently - the
+// silent exit(1) here once read as a crash loop with no cause anywhere in the logs.)
 __attribute__((constructor(101))) static void reserve_guest_space(void) {
     if (plat_reserve_guest(GUEST_LO, GUEST_HI)) return;
+    char msg[512];
+    snprintf(msg, sizeof msg,
+             "BOOT FAIL: guest window %llx-%llx could not be reserved (mmap: %s). "
+             "If this happens every time, this device's address space doesn't fit the game's layout.\n",
+             (unsigned long long)GUEST_LO, (unsigned long long)GUEST_HI, strerror(errno));
+    fprintf(stderr, "FATAL: %s", msg);
+    fflush(stderr);
+    if (const char *crashlog = getenv("SAVAGEWIND_CRASHLOG")) {  // the boot log Java reads for its diagnostics
+        int fd = open(crashlog, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            ssize_t w = write(fd, msg, strlen(msg));
+            (void)w;
+            close(fd);
+        }
+    }
 #ifdef __ANDROID__
-    fprintf(stderr, "FATAL: guest address range %llx-%llx is not free. Close Savage Wind completely and open it "
-                    "again; if it happens every time, this device doesn't have the address space (48-bit VA) the "
-                    "game needs.\n", (unsigned long long)GUEST_LO, (unsigned long long)GUEST_HI);
     exit(1);
 #else
     const char *tries = getenv("SAVAGEWIND_REEXEC");
     int n = tries ? atoi(tries) : 0;
     if (n >= 20) {
-        fprintf(stderr, "FATAL: guest address range %llx-%llx is not free\n", GUEST_LO, GUEST_HI);
+        fprintf(stderr, "FATAL: guest address range %llx-%llx is not free\n", (unsigned long long)GUEST_LO,
+                (unsigned long long)GUEST_HI);
         exit(1);
     }
     char buf[16];

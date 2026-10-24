@@ -11,24 +11,39 @@
 #define FATAL(...) (fprintf(stderr, "FATAL: " __VA_ARGS__), rt_fatal_trace())
 
 // ---- address space layout (guest addresses == host addresses)
-// macOS reserves 0x2_0000_0000-0x70_0000_0000, and guest addresses must fit in 39 bits, so the
-// guest lives in a 12.5 GB window at 0x70_0000_0000 claimed at startup (see main.c).
+// The guest lives in a 12.5 GB window claimed at startup (see main.c); every region below sits
+// inside it. The base is per-platform: macOS never maps the 8 GB..448 GB range, so there the
+// window must start at 0x7000000000 - but on Android that exact address is taken: the zygote's
+// ART boot image is mapped at a fixed low address on 39-bit-VA devices and every app inherits
+// it (dlopen'ing libmain used to fail its reservation and silently exit(1) - the restart loop).
+// Android/Linux therefore claim a window at 0x3000000000 (192 GB), far below everything the
+// system maps (system libs live at the very top, the boot image at 448 GB) on both 39- and
+// 48-bit-VA devices. Windows has no such constraint and keeps the original base.
+#ifdef __APPLE__
 #define GUEST_LO     0x7000000000ull
-#define GUEST_HI     0x7320000000ull
+#elif defined(_WIN32)
+#define GUEST_LO     0x7000000000ull
+#else
+#define GUEST_LO     0x3000000000ull
+#endif
+#define GUEST_HI     (GUEST_LO + 0x320000000ull)  // +12.5 GB
 // The exefs modules (main, subsdk0..9, sdk) sit back to back from MAIN_BASE, main first, as tools/layout.py
 // places them; the game code library says where each one is (runtime/gamelib.h). Both bounds: tools/layout.py too.
-#define MAIN_BASE    0x7000000000ull
-#define MODULES_END  0x7080000000ull
-#define HLE_BASE     0x7080000000ull   // fake addresses for host-implemented functions
+#define MAIN_BASE    GUEST_LO
+#define MODULES_END  (GUEST_LO + 0x080000000ull)
+#define HLE_BASE     (GUEST_LO + 0x080000000ull)  // fake addresses for host-implemented functions
 #define HLE_SIZE     0x0000100000ull
-#define TLS_BASE     0x7090000000ull
+#define TLS_BASE     (GUEST_LO + 0x090000000ull)
 #define TLS_SIZE     0x0000100000ull
-#define HLE_HEAP     0x7092000000ull   // guest-visible memory owned by host code
+#define HLE_HEAP     (GUEST_LO + 0x092000000ull)  // guest-visible memory owned by host code
 #define HLE_HEAP_SIZE 0x000E000000ull
-#define ALIAS_BASE   0x7100000000ull   // alias region (svcMapMemory targets)
+#define ALIAS_BASE   (GUEST_LO + 0x100000000ull)  // alias region (svcMapMemory targets)
 #define ALIAS_SIZE   0x0100000000ull
-#define HEAP_BASE    0x7240000000ull
-#define HEAP_MAX     0x00D0000000ull   // 3.25 GB
+#define HEAP_BASE    (GUEST_LO + 0x240000000ull)
+#define HEAP_MAX     0x00D0000000ull  // 3.25 GB
+// Guest-ish pointer range checks that predate GUEST_HI (fnprof.c's vtable peek, cmdbuf.c's
+// frame-pointer filter): the same width as before, relative to the base.
+#define GUEST_WIDE_HI (GUEST_LO + 0x1000000000ull)
 
 // ---- loader.c
 typedef struct Module {

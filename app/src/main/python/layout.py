@@ -18,8 +18,15 @@ import sys
 
 from nso import header
 
-MODULES_LO = 0x7000000000  # runtime/rt.h MAIN_BASE (2 MiB aligned)
-MODULES_HI = 0x7080000000  # runtime/rt.h MODULES_END: the loader refuses a module past it
+# runtime/rt.h MAIN_BASE (2 MiB aligned). Per-platform, matching GUEST_LO there: macOS only maps
+# above 0x7000000000, but on Android that address holds the zygote's ART boot image (every app
+# inherits it), so Linux/Android guests live at 0x3000000000. The game code is generated on the
+# host it runs on, so each platform bakes its own base.
+if sys.platform == 'darwin' or sys.platform == 'win32':
+    MODULES_LO = 0x7000000000
+else:
+    MODULES_LO = 0x3000000000
+MODULES_HI = MODULES_LO + 0x80000000  # runtime/rt.h MODULES_END: the loader refuses a module past it
 PAGE = 0x1000
 LOAD_ORDER = ['main'] + [f'subsdk{i}' for i in range(10)] + ['sdk']
 
