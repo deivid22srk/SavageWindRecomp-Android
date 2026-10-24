@@ -252,6 +252,63 @@ static void create_device(void) {
         .pNext = &uil_on};
     VkPhysicalDeviceFeatures2 f = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
                                    .pNext = g_vk.feedback_loop ? (void *)&lr_on : addr_report ? (void *)&abr : fault ? (void *)&ff : (void *)&f11};
+    // Turnip builds differ in which optional features they expose, and asking for an unsupported bit fails
+    // vkCreateDevice with VK_ERROR_FEATURE_NOT_PRESENT (-8): query every structure the chain above can
+    // contain in one go (the driver skips the ones it does not know), then mask the request down to what it
+    // reports. Same best-effort spirit as the b->X = h->X copies below for the base features.
+    VkPhysicalDeviceVulkan11Features sup_f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+    VkPhysicalDeviceVulkan12Features sup_f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &sup_f11};
+    VkPhysicalDeviceVulkan13Features sup_f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = &sup_f12};
+    VkPhysicalDeviceCustomBorderColorFeaturesEXT sup_cbc = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT,
+                                                            .pNext = &sup_f13};
+    VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT sup_div = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT,
+                                                                 .pNext = &sup_cbc};
+    VkPhysicalDeviceFaultFeaturesEXT sup_ff = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, .pNext = &sup_div};
+    VkPhysicalDeviceAddressBindingReportFeaturesEXT sup_abr = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT,
+                                                               .pNext = &sup_ff};
+    VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT sup_fbl = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT,
+                                                                       .pNext = &sup_abr};
+    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR sup_uil = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR,
+                                                              .pNext = &sup_fbl};
+    VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR sup_lr = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR,
+                                                                   .pNext = &sup_uil};
+    VkPhysicalDeviceFeatures2 sup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &sup_lr};
+    vkGetPhysicalDeviceFeatures2(g_vk.phys, &sup);
+#define VK_NEED(s, tag, f)                                                                                                             \
+    do {                                                                                                                               \
+        if ((s).f && !sup_##s.f) LOG("[vk] %s: %s not supported by this driver - disabled\n", tag, #f);                                \
+        (s).f = (VkBool32)((s).f && sup_##s.f);                                                                                        \
+    } while (0)
+    VK_NEED(f13, "Vulkan13", dynamicRendering);
+    VK_NEED(f13, "Vulkan13", synchronization2);
+    VK_NEED(f13, "Vulkan13", shaderDemoteToHelperInvocation);
+    VK_NEED(f13, "Vulkan13", shaderTerminateInvocation);
+    VK_NEED(f13, "Vulkan13", maintenance4);
+    VK_NEED(f12, "Vulkan12", timelineSemaphore);
+    VK_NEED(f12, "Vulkan12", shaderInt8);
+    VK_NEED(f12, "Vulkan12", samplerMirrorClampToEdge);
+    VK_NEED(f12, "Vulkan12", uniformAndStorageBuffer8BitAccess);
+    VK_NEED(f12, "Vulkan12", storageBuffer8BitAccess);
+    VK_NEED(f12, "Vulkan12", scalarBlockLayout);
+    VK_NEED(f11, "Vulkan11", storageBuffer16BitAccess);
+    VK_NEED(ff, "DeviceFault", deviceFault);
+    VK_NEED(abr, "AddressBindingReport", reportAddressBinding);
+    VK_NEED(fbl_on, "AttachmentFeedbackLoopLayout", attachmentFeedbackLoopLayout);
+    VK_NEED(uil_on, "UnifiedImageLayouts", unifiedImageLayouts);
+    VK_NEED(lr_on, "DynamicRenderingLocalRead", dynamicRenderingLocalRead);
+    VK_NEED(cbc, "CustomBorderColor", customBorderColors);
+    VK_NEED(cbc, "CustomBorderColor", customBorderColorWithoutFormat);
+    VK_NEED(div, "VertexAttributeDivisor", vertexAttributeInstanceRateDivisor);
+#undef VK_NEED
+    // keep the backend flags in sync with what was actually enabled (samplers and draws have fallbacks)
+    if (g_vk.custom_border && !(cbc.customBorderColors && cbc.customBorderColorWithoutFormat)) {
+        g_vk.custom_border = false;
+        LOG("[vk] custom border color off (features not supported)\n");
+    }
+    if (g_vk.divisor && !div.vertexAttributeInstanceRateDivisor) {
+        g_vk.divisor = false;
+        LOG("[vk] vertex attribute divisor off (feature not supported)\n");
+    }
     VkPhysicalDeviceFeatures *b = &f.features, *h = &have.features;
     b->independentBlend = h->independentBlend;
     b->dualSrcBlend = h->dualSrcBlend;
